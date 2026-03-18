@@ -1,0 +1,320 @@
+﻿<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Doctor Referral Performance – February–March 2026 (Including Revenue)</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+</head>
+
+<body>
+    <header class="hero">
+        <div class="container hero-content">
+            <div>
+                <h1>Doctor Referral Performance – February–March 2026</h1>
+                <p>Including Revenue (Row Total)</p>
+            </div>
+            <img class="logo" src="./assets/sonar-logo.png" alt="Sonar logo" />
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="exec-summary">
+            <h2>Executive Summary</h2>
+            <div class="summary-card">
+                <div class="summary-grid">
+                    <div>
+                        <h4>Total Patients</h4>
+                        <p id="summaryTotalPatients">0</p>
+                    </div>
+                    <div>
+                        <h4>Total Referring Doctors</h4>
+                        <p id="summaryDoctors">0</p>
+                    </div>
+                    <div>
+                        <h4>% Patients from &gt;5 Referrals</h4>
+                        <p id="summaryPctHigh">0%</p>
+                    </div>
+                    <div>
+                        <h4>% Doctors with &gt;5 Referrals</h4>
+                        <p id="summaryPctDoctorsHigh">0%</p>
+                    </div>
+                </div>
+                <p class="insight insight--summary" id="summaryInsight">8.4% of referring doctors generated more than five referrals and contributed 53.4% of total patient volume.</p>
+            </div>
+        </section>
+
+        <section class="kpi-section">
+            <h2>KPI Overview</h2>
+            <div class="kpis">
+                <div class="kpi">
+                    <h3>Number of Patients</h3>
+                    <p id="kpiTotalPatients">0</p>
+                </div>
+                <div class="kpi">
+                    <h3>Number of Referring Doctors</h3>
+                    <p id="kpiTotalDoctors">0</p>
+                </div>
+                <div class="kpi">
+                    <h3>Total Patients</h3>
+                    <p id="kpiTotalPatientsDuplicate">0</p>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Doctors with More Than 5 Referrals</h2>
+            <div class="chart-wrap">
+                <canvas id="doctorChart" class="chart"></canvas>
+            </div>
+            <p class="insight">Insight: Referral activity is concentrated within a limited number of doctors, with this group accounting for a significant share of total patient volume.</p>
+            <div class="table-wrap" style="margin-top: 12px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Referring Doctor</th>
+                            <th>Marketer</th>
+                            <th>Patients (Total Rows)</th>
+                            <th>Revenue (Row Total)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="highTableBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <h2>Doctors with 5 or Fewer Referrals</h2>
+            <p class="insight">Insight: The majority of referring doctors contribute low referral volumes, indicating a broad but shallow distribution of referral activity across the network.</p>
+            <div class="chart-wrap" style="margin-bottom:12px;">
+                <canvas id="lowDoctorChart" class="chart"></canvas>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Referring Doctor</th>
+                            <th>Marketer</th>
+                            <th>Patients (Total Rows)</th>
+                            <th>Revenue (Row Total)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lowTableBody"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            Generated for GitHub Pages
+            <div class="footnote">
+                <a href="./index.html">Back to main report</a>
+            </div>
+            <div class="footnote">Note: Marketer attribution excluded due to incomplete data capture.</div>
+        </div>
+    </footer>
+
+    <script src="./data/doctor_referrals_with_revenue.js"></script>
+
+    <script>
+        const formatMarketer = (m) => (m && m.trim()) ? m.trim() : '';
+        const formatCurrency = (value) => {
+            const number = Number(value) || 0;
+            return number.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        };
+        const labelWithMarketer = (doctor, marketer) => {
+            const mk = formatMarketer(marketer);
+            return mk ? `${doctor} — ${mk}` : doctor;
+        };
+
+        const loadData = async () => {
+            try {
+                const response = await fetch('./data/doctor_referrals_with_revenue.json', { cache: 'no-cache' });
+                if (response.ok) {
+                    return await response.json();
+                }
+            } catch (error) {
+                // ignore and fall back to embedded data
+            }
+
+            if (window.doctorRevenueData) {
+                return window.doctorRevenueData;
+            }
+
+            return { high: [], low: [], totals: {} };
+        };
+
+        loadData().then((data) => {
+                // adjust title to match range of dates in the dataset
+                if (data.rows && data.rows.length) {
+                    const dates = data.rows.map(r => r.date).filter(Boolean).sort();
+                    if (dates.length) {
+                        const first = new Date(dates[0]);
+                        const last = new Date(dates[dates.length - 1]);
+                        const fmt = d => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                        const titleText = `Doctor Referral Performance – ${fmt(first)}` +
+                            (first.getMonth() !== last.getMonth() || first.getFullYear() !== last.getFullYear() ? ` – ${fmt(last)}` : '');
+                        document.querySelector('header h1').textContent = titleText;
+                        document.title = titleText + ' (Including Revenue)';
+                    }
+                }
+                const high = data.high || [];
+                const low = data.low || [];
+                const totals = data.totals || {};
+
+                const totalDoctors = (totals.doctors_high || 0) + (totals.doctors_low || 0);
+                const totalPatients = totals.patients || 0;
+                const totalHigh = totals.high_patients || 0;
+
+                const pctHigh = totalPatients ? (totalHigh / totalPatients) * 100 : 0;
+                const pctDoctorsHigh = totalDoctors ? ((totals.doctors_high || 0) / totalDoctors) * 100 : 0;
+
+                document.getElementById('summaryTotalPatients').textContent = totalPatients.toLocaleString();
+                document.getElementById('summaryDoctors').textContent = totalDoctors.toLocaleString();
+                document.getElementById('summaryPctHigh').textContent = `${pctHigh.toFixed(1)}%`;
+                document.getElementById('summaryPctDoctorsHigh').textContent = `${pctDoctorsHigh.toFixed(1)}%`;
+                document.getElementById('summaryInsight').textContent = `${pctDoctorsHigh.toFixed(1)}% of referring doctors generated more than five referrals and contributed ${pctHigh.toFixed(1)}% of total patient volume.`;
+
+                document.getElementById('kpiTotalPatients').textContent = totalPatients.toLocaleString();
+                document.getElementById('kpiTotalDoctors').textContent = totalDoctors.toLocaleString();
+                document.getElementById('kpiTotalPatientsDuplicate').textContent = totalPatients.toLocaleString();
+
+                const highBody = document.getElementById('highTableBody');
+                high.forEach((row) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${row.doctor}</td>
+                        <td>${formatMarketer(row.marketer)}</td>
+                        <td>${row.patients}</td>
+                        <td>${formatCurrency(row.revenue)}</td>
+                    `;
+                    highBody.appendChild(tr);
+                });
+
+                const lowBody = document.getElementById('lowTableBody');
+                low.forEach((row) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${row.doctor}</td>
+                        <td>${formatMarketer(row.marketer)}</td>
+                        <td>${row.patients}</td>
+                        <td>${formatCurrency(row.revenue)}</td>
+                    `;
+                    lowBody.appendChild(tr);
+                });
+
+                const labels = high.map((row) => labelWithMarketer(row.doctor, row.marketer));
+                const values = high.map((row) => row.patients);
+                const revenue = high.map((row) => row.revenue);
+
+                const canvas = document.getElementById('doctorChart');
+                const chartHeight = (labels.length * 22) + 'px';
+                canvas.closest('.chart-wrap').style.height = chartHeight;
+                const ctx = canvas.getContext('2d');
+
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: 'Total Patients',
+                            data: values,
+                            backgroundColor: '#2563eb',
+                            barThickness: 10,
+                            maxBarThickness: 10,
+                            categoryPercentage: 1.0,
+                            barPercentage: 1.0
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            datalabels: {
+                                anchor: 'end',
+                                align: 'right',
+                                color: '#111827',
+                                font: { size: 10 },
+                                formatter: (value) => value
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    afterLabel: (context) => {
+                                        const idx = context.dataIndex;
+                                        return `Revenue: ${formatCurrency(revenue[idx])}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { beginAtZero: true }
+                        }
+                    },
+                    plugins: [ChartDataLabels]
+                });
+
+                // Low-volume chart (top 30 to keep height manageable)
+                const lowSlice = low.slice(0, 30);
+                const lowLabels = lowSlice.map((row) => labelWithMarketer(row.doctor, row.marketer));
+                const lowValues = lowSlice.map((row) => row.patients);
+                const lowRevenue = lowSlice.map((row) => row.revenue);
+
+                const lowCanvas = document.getElementById('lowDoctorChart');
+                const lowHeight = (lowLabels.length * 22) + 'px';
+                lowCanvas.closest('.chart-wrap').style.height = lowHeight;
+                const lowCtx = lowCanvas.getContext('2d');
+
+                new Chart(lowCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: lowLabels,
+                        datasets: [{
+                            label: 'Total Patients',
+                            data: lowValues,
+                            backgroundColor: '#10b981',
+                            barThickness: 10,
+                            maxBarThickness: 10,
+                            categoryPercentage: 1.0,
+                            barPercentage: 1.0
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            datalabels: {
+                                anchor: 'end',
+                                align: 'right',
+                                color: '#111827',
+                                font: { size: 10 },
+                                formatter: (value) => value
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    afterLabel: (context) => {
+                                        const idx = context.dataIndex;
+                                        return `Revenue: ${formatCurrency(lowRevenue[idx])}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { beginAtZero: true }
+                        }
+                    },
+                    plugins: [ChartDataLabels]
+                });
+            });
+    </script>
+</body>
+
+</html>
+

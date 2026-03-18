@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Doctor Trend Analysis – February–March 2026</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <!-- cache-bust data payloads to avoid stale browser caches -->
+    <script src="./data/doctor_referrals_with_revenue.js?v=20260316"></script>
+    <script src="./data/doctor_specialities.js?v=20260316"></script>
+    <style>
+        .nav-links {
+            display: flex;
+            gap: 12px;
+        }
+        .nav-links a {
+            color: #fff;
+            text-decoration: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            border: 1px solid rgba(255,255,255,0.3);
+            transition: all 0.2s;
+        }
+        .nav-links a:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: #fff;
+        }
+        .nav-links a.active {
+            background: rgba(255,255,255,0.2);
+            border-color: #fff;
+        }
+        .hero {
+            position: relative;
+        }
+        .filter-section {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+        .filter-section label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .filter-section select {
+            padding: 6px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+            background: #fff;
+            cursor: pointer;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 500px;
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--card);
+            border-radius: 8px;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, .06);
+        }
+        .insight-text {
+            margin-top: 12px;
+            padding: 12px;
+            background: #f1f5ff;
+            border-left: 4px solid var(--accent);
+            border-radius: 4px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="hero">
+        <div class="container hero-content">
+            <div class="nav-links">
+                <a href="./index.html">Executive Summary</a>
+                <a href="./doctor_trends.html" class="active">Doctor Trends</a>
+                <a href="./index-march-9-14.html">Mar 9-14 Analysis</a>
+            </div>
+            <div>
+                <h1>Interactive Doctor Trend Analysis</h1>
+                <p>February–March 2026 – Track referral patterns by doctor and modality</p>
+            </div>
+            <img class="logo" src="Sonar Logo 1.1 (1).png" alt="Sonar logo" />
+        </div>
+    </header>
+
+    <main class="container">
+        <section>
+            <h2>Trend Filters</h2>
+            <div class="filter-section">
+                <label>
+                    Trend View:
+                    <select id="trendView">
+                        <option value="daily">Daily Referral Trend</option>
+                        <option value="weekly">Weekly Referral Trend</option>
+                        <option value="modality">Modality Breakdown Trend</option>
+                    </select>
+                </label>
+                <label>
+                    Search Doctor:
+                    <input type="text" id="doctorSearch" placeholder="Type to filter" style="padding:4px 8px; width:180px;">
+                </label>
+                <label>
+                    Select Doctor:
+                    <select id="doctorSelect">
+                        <option value="">Loading...</option>
+                    </select>
+                </label>
+                <label>
+                    Start Date:
+                    <input type="date" id="startDate" />
+                </label>
+                <label>
+                    End Date:
+                    <input type="date" id="endDate" />
+                </label>
+                <span id="dateRangeLabel" style="color:#444; font-size:14px; margin-left:8px;"></span>
+            </div>
+        </section>
+
+        <section>
+            <h2>Trend Analysis</h2>
+            <div class="chart-container">
+                <canvas id="trendChart"></canvas>
+            </div>
+            <div class="insight-text" id="insightText">
+                Select a doctor to view their referral trends.
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="container">Generated for GitHub Pages</div>
+    </footer>
+
+    <script>
+        const formatNumber = (n) => Number(n || 0).toLocaleString();
+
+        // State management
+        const state = {
+            rows: [],
+            trendView: 'daily',
+            selectedDoctor: null,
+            chart: null,
+            highDoctors: [],
+            startDate: null,
+            endDate: null
+        };
+
+        // Helper: normalize doctor name for lookup
+        const normalizeDoctor = (name) => {
+            return (name || '').toString().trim().toUpperCase();
+        };
+
+        // Helper: get week number for a date
+        const getWeekNumber = (dateStr) => {
+            const d = new Date(dateStr);
+            const firstDay = new Date(d.getFullYear(), 0, 1);
+            const pastDaysOfYear = (d - firstDay) / 86400000;
+            return Math.ceil((pastDaysOfYear + firstDay.getDay() + 1) / 7);
+        };
+
+        // Helper: format date for display with ordinal and weekday
+        const formatDate = (dateStr) => {
+            const d = new Date(dateStr + 'T00:00:00');
+            const day = d.getDate();
+            const ordinal = (() => {
+                if (day % 10 === 1 && day !== 11) return `${day}st`;
+                if (day % 10 === 2 && day !== 12) return `${day}nd`;
+                if (day % 10 === 3 && day !== 13) return `${day}rd`;
+                return `${day}th`;
+            })();
+            const month = d.toLocaleDateString('en-US', { month: 'short' });
+            const weekday = d.toLocaleDateString('en-US', { weekday: 'long' });
+            return `${month} ${ordinal} ${weekday}`;
+        };
+
+        // Load data
+        const loadData = async () => {
+            try {
+                const resp = await fetch('./data/doctor_referrals_with_revenue.json', { cache: 'no-cache' });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    return data;
+                }
+            } catch (e) {
+                console.warn('Fetch failed, using inline', e);
+            }
+            return window.doctorRevenueData || { high: [], low: [], rows: [] };
+        };
+
+        // function to apply date filter
+        const filterByDate = (rows, start, end) => {
+            const s = start ? new Date(start) : null;
+            const e = end ? new Date(end) : null;
+            return rows.filter(r => {
+                if (!r.date) return false;
+                const d = new Date(r.date);
+                if (s && d < s) return false;
+                if (e && d > e) return false;
+                return true;
+            });
+        };
+
+        // Build daily trend data for a doctor
+        const buildDailyTrend = (rows, doctorName) => {
+            const normDoctor = normalizeDoctor(doctorName);
+            const filtered = rows.filter(r => normalizeDoctor(r.doctor) === normDoctor);
+            
+            const byDate = {};
+            filtered.forEach(r => {
+                const date = r.date || '2026-02-01';
+                if (!byDate[date]) byDate[date] = 0;
+                byDate[date]++;
+            });
+
+            const dates = Object.keys(byDate).sort();
+            return {
+                labels: dates.map(d => formatDate(d)),
+                datasets: [{
+                    label: `${doctorName} - Daily Referrals`,
+                    data: dates.map(d => byDate[d]),
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 5,
+                    pointBackgroundColor: '#2563eb',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointHoverRadius: 7
+                }],
+                dates: dates
+            };
+        };
+
+        // Build weekly trend data for a doctor
+        const buildWeeklyTrend = (rows, doctorName) => {
+            const normDoctor = normalizeDoctor(doctorName);
+            const filtered = rows.filter(r => normalizeDoctor(r.doctor) === normDoctor);
+
+            const byWeek = {};
+            filtered.forEach(r => {
+                const date = r.date || '2026-02-01';
+                const week = getWeekNumber(date);
+                if (!byWeek[week]) byWeek[week] = 0;
+                byWeek[week]++;
+            });
+
+            // Get sorted unique weeks and map to 1, 2, 3, 4
+            const uniqueWeeks = Object.keys(byWeek).map(Number).sort((a, b) => a - b);
+            const weekMapping = {};
+            uniqueWeeks.forEach((week, idx) => {
+                weekMapping[week] = idx + 1;
+            });
+
+            const mappedWeeks = uniqueWeeks.map(w => weekMapping[w]);
+            return {
+                labels: mappedWeeks.map(w => `Week ${w}`),
+                datasets: [{
+                    label: `${doctorName} - Weekly Referrals`,
+                    data: mappedWeeks.map(w => byWeek[uniqueWeeks[w - 1]]),
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 5,
+                    pointBackgroundColor: '#2563eb',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointHoverRadius: 7
+                }],
+                dates: mappedWeeks
+
+            };
+        };
+
+        // Build modality breakdown trend for a doctor
+        const buildModalityTrend = (rows, doctorName) => {
+            const normDoctor = normalizeDoctor(doctorName);
+            const filtered = rows.filter(r => normalizeDoctor(r.doctor) === normDoctor);
+
+            const byDateModality = {};
+            const allDates = new Set();
+            filtered.forEach(r => {
+                const date = r.date || '2026-02-01';
+                const modality = r.modality || 'OTHER';
+                allDates.add(date);
+                if (!byDateModality[date]) byDateModality[date] = {};
+                if (!byDateModality[date][modality]) byDateModality[date][modality] = 0;
+                byDateModality[date][modality]++;
+            });
+
+            const dates = [...allDates].sort();
+            const modalities = new Set();
+            Object.values(byDateModality).forEach(mods => {
+                Object.keys(mods).forEach(m => modalities.add(m));
+            });
+            
+            const modList = [...modalities].sort();
+            const colors = {
+                'MRI': '#3b82f6',
+                'CT': '#ef4444',
+                'XRAY': '#10b981',
+                'ULTRASOUND': '#f59e0b'
+            };
+
+            const datasets = modList.map((mod, idx) => {
+                const palette = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+                return {
+                    label: mod,
+                    data: dates.map(d => byDateModality[d] && byDateModality[d][mod] ? byDateModality[d][mod] : 0),
+                    borderColor: colors[mod] || palette[idx % palette.length],
+                    backgroundColor: (colors[mod] || palette[idx % palette.length]) + '20',
+                    tension: 0.4,
+                    fill: false,
+                    pointRadius: 4,
+                    pointBackgroundColor: colors[mod] || palette[idx % palette.length],
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 1,
+                    pointHoverRadius: 6
+                };
+            });
+
+            return {
+                labels: dates.map(d => formatDate(d)),
+                datasets: datasets,
+                dates: dates
+            };
+        };
+
+        // Render chart (applies date filter then builds according to view)
+        const renderChart = () => {
+            if (!state.selectedDoctor) return;
+
+            // apply date filtering first
+            let rows = state.rows;
+            if (state.startDate || state.endDate) {
+                rows = filterByDate(rows, state.startDate, state.endDate);
+            }
+
+            const canvas = document.getElementById('trendChart');
+            const ctx = canvas.getContext('2d');
+
+            let chartData;
+            if (state.trendView === 'daily') {
+                chartData = buildDailyTrend(rows, state.selectedDoctor);
+            } else if (state.trendView === 'weekly') {
+                chartData = buildWeeklyTrend(rows, state.selectedDoctor);
+            } else {
+                chartData = buildModalityTrend(rows, state.selectedDoctor);
+            }
+
+            if (state.chart) state.chart.destroy();
+
+            state.chart = new Chart(ctx, {
+                type: state.trendView === 'modality' ? 'line' : 'line',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            padding: 12,
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 12 },
+                            borderColor: '#fff',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: state.trendView === 'daily' ? 'Date' : (state.trendView === 'weekly' ? 'Week' : 'Date'),
+                                font: { size: 12 }
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Referral Count',
+                                font: { size: 12 }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Update insight -- use filtered rows and include date range
+            const total = rows.filter(r => normalizeDoctor(r.doctor) === normalizeDoctor(state.selectedDoctor)).length;
+            const viewText = state.trendView === 'daily' ? 'daily' : (state.trendView === 'weekly' ? 'weekly' : 'modality-based');
+            let dateText = '';
+            if (state.startDate || state.endDate) {
+                dateText = ` from ${state.startDate || ''}` + (state.endDate ? ` to ${state.endDate}` : '');
+            }
+            document.getElementById('insightText').textContent = 
+                `${state.selectedDoctor} had ${formatNumber(total)} total referrals${dateText}. The chart above shows the ${viewText} breakdown of referral activity.`;
+        };
+
+        // Initialize doctor dropdown
+        const initDoctorSelect = () => {
+            // also set up date inputs based on available data
+            const dates = state.rows.map(r => r.date).filter(Boolean).sort();
+            if (dates.length) {
+                const startInput = document.getElementById('startDate');
+                const endInput = document.getElementById('endDate');
+                startInput.min = dates[0];
+                startInput.max = dates[dates.length - 1];
+                endInput.min = dates[0];
+                endInput.max = dates[dates.length - 1];
+                startInput.value = dates[0];
+                endInput.value = dates[dates.length - 1];
+                state.startDate = dates[0];
+                state.endDate = dates[dates.length - 1];
+                document.getElementById('dateRangeLabel').textContent = `${state.startDate} to ${state.endDate}`;
+
+                // add event listeners to update filtering
+                startInput.addEventListener('change', (e) => {
+                    state.startDate = e.target.value;
+                    document.getElementById('dateRangeLabel').textContent = `${state.startDate} to ${state.endDate}`;
+                    if (state.selectedDoctor) renderChart();
+                });
+                endInput.addEventListener('change', (e) => {
+                    state.endDate = e.target.value;
+                    document.getElementById('dateRangeLabel').textContent = `${state.startDate} to ${state.endDate}`;
+                    if (state.selectedDoctor) renderChart();
+                });
+            }
+            const sel = document.getElementById('doctorSelect');
+            const searchInput = document.getElementById('doctorSearch');
+            let doctorNames = [...new Set(state.highDoctors.map(d => d.doctor))].sort();
+            
+            const populateOptions = (names) => {
+                sel.innerHTML = '<option value="">-- Select a doctor --</option>';
+                names.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    sel.appendChild(opt);
+                });
+            };
+            populateOptions(doctorNames);
+
+            // filter list as user types
+            searchInput.addEventListener('input', (e) => {
+                const term = e.target.value.toLowerCase();
+                const filtered = doctorNames.filter(n => n.toLowerCase().includes(term));
+                populateOptions(filtered);
+                // if current selection no longer exists, clear
+                if (sel.value && !filtered.includes(sel.value)) {
+                    sel.value = '';
+                    state.selectedDoctor = null;
+                    if (state.chart) state.chart.destroy();
+                    document.getElementById('insightText').textContent = 'Select a doctor to view their referral trends.';
+                }
+            });
+
+            doctorNames.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                sel.appendChild(opt);
+            });
+
+            sel.addEventListener('change', () => {
+                state.selectedDoctor = sel.value;
+                if (state.selectedDoctor) {
+                    renderChart();
+                }
+            });
+
+            // Auto-select first doctor
+            if (doctorNames.length > 0) {
+                state.selectedDoctor = doctorNames[0];
+                sel.value = doctorNames[0];
+                renderChart();
+            }
+        };
+
+        // Event listeners
+        document.getElementById('trendView').addEventListener('change', (e) => {
+            state.trendView = e.target.value;
+            if (state.selectedDoctor) renderChart();
+        });
+
+        // Initialize page
+        loadData().then((data) => {
+            state.rows = data.rows || [];
+            state.highDoctors = data.high || [];
+            // dynamically adjust subtitle based on data dates
+            if (state.rows.length) {
+                const dates = state.rows.map(r => r.date).filter(Boolean).sort();
+                const first = new Date(dates[0]);
+                const last = new Date(dates[dates.length - 1]);
+                const fmt = d => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                const subtitle = `${fmt(first)}${(first.getMonth() !== last.getMonth() || first.getFullYear() !== last.getFullYear()) ? ' – ' + fmt(last) : ''} – Track referral patterns by doctor and modality`;
+                const p = document.querySelector('header .hero-content > div > p');
+                if (p) p.textContent = subtitle;
+                document.title = `Doctor Trend Analysis – ${fmt(first)}${(first.getMonth() !== last.getMonth() || first.getFullYear() !== last.getFullYear()) ? ' – ' + fmt(last) : ''}`;
+            }
+            initDoctorSelect();
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Doctor Referral Performance – February–March 2026 (Date Range)</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+  <script src="./data/doctor_referrals_with_revenue.js"></script>
+</head>
+<body>
+  <header class="hero">
+    <div class="container hero-content">
+      <div>
+        <h1>Doctor Referral Performance – February–March 2026</h1>
+        <p>Select a date range to filter the report</p>
+        <p><a href="./index.html">View full February report</a></p>
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <label>Start
+            <input type="date" id="startDate" />
+          </label>
+          <label>End
+            <input type="date" id="endDate" />
+          </label>
+          <button id="applyDate" style="padding:6px 12px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;">Apply</button>
+          <span id="dateRangeLabel" style="color:#e5e7eb;"></span>
+        </div>
+      </div>
+      <img class="logo" src="logo.png" alt="Sonar logo" />
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="exec-summary">
+      <h2>Executive Summary</h2>
+      <div class="summary-card">
+        <div class="summary-grid">
+          <div>
+            <h4>Total Patients</h4>
+            <p id="summaryTotalPatients">0</p>
+          </div>
+          <div>
+            <h4>Total Referring Doctors</h4>
+            <p id="summaryDoctors">0</p>
+          </div>
+          <div>
+            <h4>% Patients from &gt;5 Referrals</h4>
+            <p id="summaryPctHigh">0%</p>
+          </div>
+          <div>
+            <h4>% Doctors with &gt;5 Referrals</h4>
+            <p id="summaryPareto">0%</p>
+          </div>
+        </div>
+        <p class="insight insight--summary" id="summaryInsight"></p>
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2>KPI Overview</h2>
+      <div class="kpis">
+        <div class="kpi">
+          <h3>Number of Patients</h3>
+          <p id="kpiTotalPatients">0</p>
+        </div>
+        <div class="kpi">
+          <h3>Number of Referring Doctors</h3>
+          <p id="kpiTotalDoctors">0</p>
+        </div>
+        <div class="kpi">
+          <h3>Total Patients</h3>
+          <p id="kpiTotalPatientsDuplicate">0</p>
+        </div>
+      </div>
+      <div class="kpis kpis--small">
+        <div class="kpi kpi--small">
+          <h3>Total Duplicate Patient Records</h3>
+          <p id="kpiDuplicateRecords">0</p>
+        </div>
+        <div class="kpi kpi--small">
+          <h3>% Duplicate Patients</h3>
+          <p id="kpiDuplicatePct">0%</p>
+        </div>
+        <div class="kpi kpi--small">
+          <h3>% Doctors with Duplicate Patients</h3>
+          <p id="kpiDoctorDuplicatePct">0%</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Doctors with More Than 5 Referrals</h2>
+      <div class="chart-wrap">
+        <canvas id="doctorChart" class="chart"></canvas>
+      </div>
+      <p class="insight">Click a bar to see doctor-level breakdown.</p>
+      <div id="highBreakdown"></div>
+      <div id="highDetail" class="table-wrap" style="display:none; margin-top:10px;"></div>
+    </section>
+
+    <section>
+      <h2>Doctors with 5 or Fewer Referrals</h2>
+      <p class="insight">Low-volume doctors for the selected date range.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Referring Doctor</th>
+              <th>Patients (Total Rows)</th>
+              <th>Share of Total (%)</th>
+              <th>MRI %</th>
+              <th>CT %</th>
+              <th>XRAY %</th>
+              <th>Ultrasound %</th>
+            </tr>
+          </thead>
+          <tbody id="lowTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">Generated for GitHub Pages</div>
+  </footer>
+
+  <script>
+    const modalityCols = ["MRI", "CT", "XRAY", "ULTRASOUND"];
+    const formatNumber = (n) => Number(n || 0).toLocaleString();
+    const formatPct = (n, d) => {
+      const pct = d ? (n / d) * 100 : 0;
+      return `${pct.toFixed(1)}%`;
+    };
+    const parseDate = (s) => s ? new Date(s) : null;
+
+    const loadData = () => window.doctorRevenueData || { rows: [], totals: {} };
+
+    const aggregate = (rows) => {
+      const totals = {
+        patients: rows.length,
+        unique_patients: new Set(rows.map(r => r.patient || '')).size,
+        duplicate_patients: 0,
+        doctors_with_duplicates: 0,
+      };
+      totals.duplicate_patients = totals.patients - totals.unique_patients;
+
+      const byDoctor = new Map();
+      rows.forEach(r => {
+        const d = r.doctor || 'UNKNOWN';
+        if (!byDoctor.has(d)) byDoctor.set(d, {
+          doctor: d,
+          patients: 0,
+          revenue: 0,
+          modalities: { MRI: 0, CT: 0, XRAY: 0, ULTRASOUND: 0, OTHER: 0 },
+          patientSet: new Set(),
+        });
+        const rec = byDoctor.get(d);
+        rec.patients += 1;
+        rec.revenue += Number(r.revenue) || 0;
+        rec.modalities[r.modality?.toUpperCase()] = (rec.modalities[r.modality?.toUpperCase()] || 0) + 1;
+        rec.patientSet.add(r.patient || '');
+      });
+
+      byDoctor.forEach(rec => {
+        const uniq = rec.patientSet.size;
+        if (uniq < rec.patients) totals.doctors_with_duplicates += 1;
+        modalityCols.forEach(m => {
+          const count = rec.modalities[m.toUpperCase()] || 0;
+          rec.modalities[m + "_pct"] = Number(rec.patients ? (count / rec.patients * 100) : 0);
+          rec.modalities[m + "_count"] = count;
+        });
+      });
+
+      const all = Array.from(byDoctor.values());
+      const high = all.filter(r => r.patients > 5).sort((a, b) => b.patients - a.patients);
+      const low = all.filter(r => r.patients <= 5).sort((a, b) => b.patients - a.patients);
+
+      totals.high_patients = high.reduce((s, r) => s + r.patients, 0);
+      totals.doctors_high = high.length;
+      totals.doctors_low = low.length;
+      totals.duplicate_patients_pct = totals.patients ? (totals.duplicate_patients / totals.patients * 100) : 0;
+      totals.doctors_with_duplicates_pct = (totals.doctors_high + totals.doctors_low) ?
+        (totals.doctors_with_duplicates / (totals.doctors_high + totals.doctors_low) * 100) : 0;
+
+      return { high, low, totals };
+    };
+
+    const state = {
+      rows: [],
+      filtered: [],
+      aggregates: null,
+      chart: null,
+      totalPatients: 0
+    };
+
+    const mainHospital = (name = '') => {
+      const cleaned = (name || '')
+        .replace(/[\u2013\u2014]/g, '-')
+        .replace(/\s*-\s*/g, ' - ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const base = cleaned.split(' - ')[0].trim();
+      let canonical = base.replace(/\(.*?\)/g, '').replace(/\s*KNH\s*$/i, '').trim() || base;
+      const upper = canonical.toUpperCase();
+      const anchors = ['NAIROBI SPINE', 'KENYATTA NATIONAL HOSPITAL', 'AGA KHAN UNIVERSITY HOSPITAL', 'COPTIC HOSPITAL',
+        'THE NAIROBI HOSPITAL', 'EQUITY AFIA', 'MP SHAH HOSPITAL', 'MP SHA HOSPITAL', 'MIRAZI',
+        'KENYA AIRWAYS PRIDE CLINIC', 'KQ MEDICAL', 'KQ'];
+      for (const a of anchors) {
+        if (upper.includes(a)) return a;
+      }
+      return upper;
+    };
+
+    const renderSummary = (totals) => {
+      const totalPatients = totals.patients || 0;
+      const totalDoctors = (totals.doctors_high || 0) + (totals.doctors_low || 0);
+      const pctHigh = totalPatients ? (totals.high_patients || 0) / totalPatients * 100 : 0;
+      const pctHighDoctors = totalDoctors ? (totals.doctors_high || 0) / totalDoctors * 100 : 0;
+      document.getElementById('summaryTotalPatients').textContent = formatNumber(totalPatients);
+      document.getElementById('summaryDoctors').textContent = formatNumber(totalDoctors);
+      document.getElementById('summaryPctHigh').textContent = `${pctHigh.toFixed(1)}%`;
+      document.getElementById('summaryPareto').textContent = `${pctHighDoctors.toFixed(1)}%`;
+      document.getElementById('summaryInsight').textContent =
+        `${pctHighDoctors.toFixed(1)}% of referring doctors generated more than five referrals and contributed ${pctHigh.toFixed(1)}% of total patient volume.`;
+
+      document.getElementById('kpiTotalPatients').textContent = formatNumber(totalPatients);
+      document.getElementById('kpiTotalDoctors').textContent = formatNumber(totalDoctors);
+      document.getElementById('kpiTotalPatientsDuplicate').textContent = formatNumber(totalPatients);
+      document.getElementById('kpiDuplicateRecords').textContent = formatNumber(totals.duplicate_patients || 0);
+      document.getElementById('kpiDuplicatePct').textContent = `${(totals.duplicate_patients_pct || 0).toFixed(1)}%`;
+      document.getElementById('kpiDoctorDuplicatePct').textContent = `${(totals.doctors_with_duplicates_pct || 0).toFixed(1)}%`;
+    };
+
+    const renderChart = (agg) => {
+      const labels = agg.high.map(r => r.doctor);
+      const values = agg.high.map(r => r.patients);
+      const canvas = document.getElementById('doctorChart');
+      const ctx = canvas.getContext('2d');
+      const chartWrap = canvas.closest('.chart-wrap');
+      chartWrap.style.height = (labels.length * 28) + 'px';
+      const total = agg.totals.patients || 1;
+
+      if (state.chart) state.chart.destroy();
+      state.chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Total Patients',
+            data: values,
+            backgroundColor: '#2563eb',
+            barThickness: 14,
+            maxBarThickness: 14,
+            categoryPercentage: 1.0,
+            barPercentage: 1.0
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: { right: 80 }
+          },
+          plugins: {
+            legend: { display: false },
+            datalabels: {
+              anchor: 'end',
+              align: ctx => {
+                const v = ctx.dataset.data[ctx.dataIndex];
+                const pct = total ? (v / total) : 0;
+                return pct > 0.9 ? 'start' : 'end';
+              },
+              color: '#0f172a',
+              font: { size: 11, weight: '700' },
+              formatter: (value) => `${value} (${(value / total * 100).toFixed(1)}%)`,
+              clamp: true,
+              clip: false
+            }
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              ticks: { color: '#111827', font: { size: 11 } },
+              grid: { color: 'rgba(0,0,0,0.05)' }
+            },
+            y: { ticks: { color: '#0f172a', font: { size: 12, weight: '600' } } }
+          }
+        },
+        plugins: [ChartDataLabels]
+      });
+
+      // Bar click -> show breakdown
+      canvas.onclick = (evt) => {
+        const points = state.chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+        if (!points.length) return;
+        const idx = points[0].index;
+        const doctor = labels[idx];
+        const docRows = state.filtered.filter(r => r.doctor === doctor);
+        const totalPatients = agg.totals.patients || 1;
+        const rowsHtml = docRows
+          .sort((a, b) => (a.patient || '').localeCompare(b.patient || ''))
+          .map(r => `
+            <tr>
+              <td>${r.patient || ''}</td>
+              <td>${r.modality || ''}</td>
+              <td>${r.date || ''}</td>
+            </tr>
+          `).join('');
+        const detail = document.getElementById('highDetail');
+        detail.innerHTML = `
+          <table>
+            <thead>
+              <tr><th>Patient</th><th>Modality</th><th>Posting Date</th></tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        `;
+        detail.style.display = '';
+      };
+    };
+
+    const renderLowTable = (agg) => {
+      const tbody = document.getElementById('lowTableBody');
+      tbody.innerHTML = '';
+      const totalPatients = agg.totals.patients || 1;
+      agg.low.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${row.doctor}</td>
+          <td>${formatNumber(row.patients)}</td>
+          <td>${formatPct(row.patients, totalPatients)}</td>
+          <td>${(row.modalities.mri_pct ?? 0).toFixed(1)}%</td>
+          <td>${(row.modalities.ct_pct ?? 0).toFixed(1)}%</td>
+          <td>${(row.modalities.xray_pct ?? 0).toFixed(1)}%</td>
+          <td>${(row.modalities.ultrasound_pct ?? 0).toFixed(1)}%</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    };
+
+    const filterByDate = (rows, start, end) => {
+      const s = start ? new Date(start) : null;
+      const e = end ? new Date(end) : null;
+      return rows.filter(r => {
+        if (!r.date) return false;
+        const d = new Date(r.date);
+        if (s && d < s) return false;
+        if (e && d > e) return false;
+        return true;
+      });
+    };
+
+    const initDateControls = (rows) => {
+      const dates = rows.map(r => r.date).filter(Boolean).sort();
+      const min = dates[0];
+      const max = dates[dates.length - 1];
+      const startInput = document.getElementById('startDate');
+      const endInput = document.getElementById('endDate');
+      startInput.min = min;
+      startInput.max = max;
+      endInput.min = min;
+      endInput.max = max;
+      startInput.value = min || '';
+      endInput.value = max || '';
+      return { min, max };
+    };
+
+    const applyFilter = () => {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      const filtered = filterByDate(state.rows, start, end);
+      state.filtered = filtered;
+      state.aggregates = aggregate(filtered);
+      renderSummary(state.aggregates.totals);
+      renderChart(state.aggregates);
+      renderLowTable(state.aggregates);
+      document.getElementById('dateRangeLabel').textContent = `${start || ''} to ${end || ''}`;
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const data = loadData();
+      const rows = (data.rows || []).filter(r => !!r.date);
+      state.rows = rows;
+      initDateControls(rows);
+
+      // update title dynamically based on data range
+      if (rows.length) {
+        const dates = rows.map(r => r.date).sort();
+        const first = new Date(dates[0]);
+        const last = new Date(dates[dates.length - 1]);
+        const fmt = d => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const titleText = `Doctor Referral Performance – ${fmt(first)}` +
+          (first.getMonth() !== last.getMonth() || first.getFullYear() !== last.getFullYear() ? ` – ${fmt(last)}` : '');
+        document.querySelector('header h1').textContent = titleText;
+        document.title = titleText + ' (Date Range)';
+      }
+
+      document.getElementById('applyDate').addEventListener('click', applyFilter);
+      applyFilter();
+    });
+  </script>
+</body>
+</html>
